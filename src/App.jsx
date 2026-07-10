@@ -11,12 +11,13 @@ export default function App() {
   const [todos, setTodos] = useState([])
   const [search, setSearch] = useState('')
   const [conversations, setConversations] = useState([])
-  const [conversationId] = useState(() => Date.now().toString())
+  const [conversationId, setConversationId] = useState(() => Date.now().toString())
   const [contextMenu, setContextMenu] = useState(null)
   const [highlightedMsg, setHighlightedMsg] = useState(null)
   const bottomRef = useRef(null)
   const chatRef = useRef(null)
   const msgRefs = useRef({})
+  const conversationDocId = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -47,9 +48,36 @@ export default function App() {
   }
 
   const loadConversations = async () => {
-    const q = query(collection(db, 'conversations'), orderBy('createdAt', 'desc'))
+    const q = query(collection(db, 'conversations'), orderBy('updatedAt', 'desc'))
     const snap = await getDocs(q)
     setConversations(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+  }
+
+  const newConversation = () => {
+    setMessages([])
+    setConversationId(Date.now().toString())
+    conversationDocId.current = null
+  }
+
+  const extractAndSaveTodos = async (text) => {
+    const todoMatch = text.match(/<todo>([\s\S]*?)<\/todo>/)
+    if (!todoMatch) return
+    const todoText = todoMatch[1]
+    const lines = todoText.split('\n').filter(l => l.trim().startsWith('-'))
+    const today = new Date().toISOString().split('T')[0]
+    for (const line of lines) {
+      const clean = line.replace(/^-\s*/, '').trim()
+      if (clean && clean.length > 1 && clean.length < 100) {
+        await addDoc(collection(db, 'todos'), {
+          text: clean,
+          done: false,
+          date: today,
+          createdAt: serverTimestamp()
+        })
+      }
+    }
+    await loadTodos()
+    if (!panelOpen) setPanelOpen(true)
   }
 
   const sendMessage = async () => {
@@ -67,16 +95,29 @@ export default function App() {
         body: JSON.stringify({ messages: newMessages })
       })
       const data = await res.json()
-      const assistantMsg = { role: 'assistant', content: data.content }
+      const rawContent = data.content
+      const displayContent = rawContent.replace(/<todo>[\s\S]*?<\/todo>/g, '').trim()
+      const assistantMsg = { role: 'assistant', content: displayContent }
       const finalMessages = [...newMessages, assistantMsg]
       setMessages(finalMessages)
 
-      await addDoc(collection(db, 'conversations'), {
-        conversationId,
-        messages: finalMessages,
-        preview: input.slice(0, 60),
-        createdAt: serverTimestamp()
-      })
+      await extractAndSaveTodos(rawContent)
+
+      if (!conversationDocId.current) {
+        const docRef = await addDoc(collection(db, 'conversations'), {
+          conversationId,
+          messages: finalMessages,
+          preview: input.slice(0, 60),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        })
+        conversationDocId.current = docRef.id
+      } else {
+        await updateDoc(doc(db, 'conversations', conversationDocId.current), {
+          messages: finalMessages,
+          updatedAt: serverTimestamp()
+        })
+      }
       loadConversations()
     } catch (e) {
       console.error(e)
@@ -95,18 +136,16 @@ export default function App() {
     setContextMenu(null)
   }
 
-  const addTodo = async (content) => {
-    const lines = content.split('\n').filter(l => l.trim())
-    for (const line of lines) {
-      const clean = line.replace(/^[-*\d.]+\s*/, '').replace(/\*\*/g, '').trim()
-      if (clean) {
-        await addDoc(collection(db, 'todos'), {
-          text: clean,
-          done: false,
-          createdAt: serverTimestamp()
-        })
-      }
-    }
+  const addTodoManual = async (content) => {
+    const clean = content.replace(/\*\*/g, '').replace(/^[-*\d.]+\s*/, '').trim().slice(0, 80)
+    if (!clean) return
+    const today = new Date().toISOString().split('T')[0]
+    await addDoc(collection(db, 'todos'), {
+      text: clean,
+      done: false,
+      date: today,
+      createdAt: serverTimestamp()
+    })
     loadTodos()
     setContextMenu(null)
     if (!panelOpen) setPanelOpen(true)
@@ -149,38 +188,36 @@ export default function App() {
   const renderMessage = (content) => {
     const lines = content.split('\n')
     return lines.map((line, i) => {
-      const bold = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      if (line.startsWith('**') && line.endsWith('**')) {
-        return <div key={i} style={{ fontWeight: '600', color: '#fff', marginTop: i > 0 ? '10px' : 0 }}>{line.replace(/\*\*/g, '')}</div>
-      }
-      if (line.match(/^[-*]\s+\[.\]/)) {
-        const done = line.includes('[x]')
-        const text = line.replace(/^[-*]\s+\[.\]\s*/, '')
-        return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 0' }}>
-            <div style={{ width: '15px', height: '15px', borderRadius: '3px', border: done ? 'none' : '1.5px solid #444', background: done ? '#c0392b' : 'transparent', flexShrink: 0 }} />
-            <span style={{ color: done ? '#555' : '#ccc', fontSize: '14px', textDecoration: done ? 'line-through' : 'none' }}>{text}</span>
-          </div>
-        )
-      }
-      if (line.match(/^\d+\.\s/)) {
-        return <div key={i} style={{ color: '#ccc', fontSize: '14px', padding: '2px 0' }}>{line}</div>
-      }
-      if (line.startsWith('- ') || line.startsWith('* ')) {
-        return <div key={i} style={{ color: '#ccc', fontSize: '14px', padding: '2px 0' }}>• {line.slice(2)}</div>
-      }
       if (line === '---') return <hr key={i} style={{ border: 'none', borderTop: '1px solid #222', margin: '8px 0' }} />
       if (line === '') return <div key={i} style={{ height: '5px' }} />
-      return <div key={i} style={{ color: '#ddd', fontSize: '15px', lineHeight: '1.6' }} dangerouslySetInnerHTML={{ __html: bold }} />
+      const isHeader = /^\*\*[^*]+\*\*$/.test(line.trim())
+      if (isHeader) return <div key={i} style={{ fontWeight: '600', color: '#eee', marginTop: i > 0 ? '10px' : 0, fontSize: '14px' }}>{line.replace(/\*\*/g, '')}</div>
+      if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ color: '#ccc', fontSize: '14px', padding: '2px 0', lineHeight: '1.6' }}>• {line.slice(2)}</div>
+      if (/^\d+\.\s/.test(line)) return <div key={i} style={{ color: '#ccc', fontSize: '14px', padding: '2px 0' }}>{line}</div>
+      const html = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      return <div key={i} style={{ color: '#ddd', fontSize: '15px', lineHeight: '1.6' }} dangerouslySetInnerHTML={{ __html: html }} />
     })
   }
 
+  const todosByDate = todos.reduce((acc, todo) => {
+    const date = todo.date || 'earlier'
+    if (!acc[date]) acc[date] = []
+    acc[date].push(todo)
+    return acc
+  }, {})
+
+  const formatDate = (dateStr) => {
+    if (!dateStr || dateStr === 'earlier') return 'Earlier'
+    const today = new Date().toISOString().split('T')[0]
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+    if (dateStr === today) return 'Today'
+    if (dateStr === yesterday) return 'Yesterday'
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
   const filteredPins = pins.filter(p => p.content?.toLowerCase().includes(search.toLowerCase()))
-  const filteredTodos = todos.filter(t => t.text?.toLowerCase().includes(search.toLowerCase()))
   const filteredConvos = conversations.filter(c => c.preview?.toLowerCase().includes(search.toLowerCase()))
   const isMobile = window.innerWidth < 768
-  const doneTodos = filteredTodos.filter(t => t.done)
-  const pendingTodos = filteredTodos.filter(t => !t.done)
 
   return (
     <div style={{ display: 'flex', height: '100dvh', width: '100vw', overflow: 'hidden', background: '#0a0a0a', color: '#f5f5f5', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
@@ -189,44 +226,32 @@ export default function App() {
       {contextMenu && (
         <div onClick={e => e.stopPropagation()} style={{
           position: 'fixed',
-          top: Math.min(contextMenu.y, window.innerHeight - 120),
-          left: Math.min(contextMenu.x, window.innerWidth - 170),
+          top: Math.min(contextMenu.y, window.innerHeight - 150),
+          left: Math.min(contextMenu.x, window.innerWidth - 180),
           background: '#1c1c1c', border: '1px solid #2a2a2a',
           borderRadius: '10px', padding: '4px', zIndex: 9999,
-          boxShadow: '0 8px 30px rgba(0,0,0,0.7)', minWidth: '160px'
+          boxShadow: '0 8px 30px rgba(0,0,0,0.7)', minWidth: '170px'
         }}>
-          <button
-            onClick={() => pinMessage(contextMenu.text, contextMenu.msgIndex)}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '9px 14px', background: 'none', border: 'none', color: '#f5f5f5', cursor: 'pointer', fontSize: '14px', borderRadius: '7px', textAlign: 'left' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#2a2a2a'}
-            onMouseLeave={e => e.currentTarget.style.background = 'none'}
-          >
-            <span style={{ color: '#c0392b' }}>📌</span> Pin
-          </button>
-          <button
-            onClick={() => addTodo(contextMenu.text)}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '9px 14px', background: 'none', border: 'none', color: '#f5f5f5', cursor: 'pointer', fontSize: '14px', borderRadius: '7px', textAlign: 'left' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#2a2a2a'}
-            onMouseLeave={e => e.currentTarget.style.background = 'none'}
-          >
-            <span>✅</span> Add to Todo
-          </button>
-          <button
-            onClick={() => { navigator.clipboard.writeText(contextMenu.text); setContextMenu(null) }}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '9px 14px', background: 'none', border: 'none', color: '#f5f5f5', cursor: 'pointer', fontSize: '14px', borderRadius: '7px', textAlign: 'left' }}
-            onMouseEnter={e => e.currentTarget.style.background = '#2a2a2a'}
-            onMouseLeave={e => e.currentTarget.style.background = 'none'}
-          >
-            <span>⎘</span> Copy
-          </button>
+          {[
+            { icon: '📌', label: 'Pin', color: '#c0392b', action: () => pinMessage(contextMenu.text, contextMenu.msgIndex) },
+            { icon: '✅', label: 'Add to Todo', action: () => addTodoManual(contextMenu.text) },
+            { icon: '⎘', label: 'Copy', action: () => { navigator.clipboard.writeText(contextMenu.text); setContextMenu(null) } }
+          ].map(({ icon, label, color, action }) => (
+            <button key={label} onClick={action}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '9px 14px', background: 'none', border: 'none', color: '#f5f5f5', cursor: 'pointer', fontSize: '14px', borderRadius: '7px', textAlign: 'left' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#2a2a2a'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              <span style={color ? { color } : {}}>{icon}</span> {label}
+            </button>
+          ))}
         </div>
       )}
 
       {/* Side Panel */}
       {panelOpen && (
         <div style={{
-          width: isMobile ? '100vw' : '280px',
-          minWidth: isMobile ? '100vw' : '280px',
+          width: isMobile ? '100vw' : '280px', minWidth: isMobile ? '100vw' : '280px',
           background: '#0f0f0f', borderRight: '1px solid #1a1a1a',
           display: 'flex', flexDirection: 'column',
           position: isMobile ? 'fixed' : 'relative',
@@ -245,46 +270,47 @@ export default function App() {
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
 
-            {/* Todo Section */}
-            {filteredTodos.length > 0 && (
-              <div style={{ marginBottom: '20px' }}>
-                <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>
-                  Todo · {pendingTodos.length} left
-                </div>
-                {pendingTodos.map(todo => (
-                  <div key={todo.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px', marginBottom: '4px', cursor: 'pointer' }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#161616'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <div onClick={() => toggleTodo(todo.id, todo.done)}
-                      style={{ width: '16px', height: '16px', borderRadius: '4px', border: '1.5px solid #333', background: 'transparent', flexShrink: 0, cursor: 'pointer' }} />
-                    <span style={{ fontSize: '13px', color: '#ccc', flex: 1 }}>{todo.text}</span>
-                    <button onClick={() => deleteTodo(todo.id)} style={{ background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: '16px', padding: 0, flexShrink: 0 }}
-                      onMouseEnter={e => e.currentTarget.style.color = '#c0392b'}
-                      onMouseLeave={e => e.currentTarget.style.color = '#333'}>×</button>
+            {/* Todos by date */}
+            {Object.keys(todosByDate).sort((a, b) => b.localeCompare(a)).map(date => {
+              const dateTodos = todosByDate[date].filter(t => t.text?.toLowerCase().includes(search.toLowerCase()))
+              if (dateTodos.length === 0) return null
+              const pending = dateTodos.filter(t => !t.done)
+              const done = dateTodos.filter(t => t.done)
+              return (
+                <div key={date} style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{formatDate(date)}</span>
+                    {pending.length > 0 && <span style={{ color: '#333' }}>{pending.length} left</span>}
                   </div>
-                ))}
-                {doneTodos.length > 0 && (
-                  <>
-                    <div style={{ fontSize: '10px', color: '#333', marginTop: '8px', marginBottom: '6px' }}>Completed</div>
-                    {doneTodos.map(todo => (
-                      <div key={todo.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '8px', marginBottom: '4px' }}>
-                        <div onClick={() => toggleTodo(todo.id, todo.done)}
-                          style={{ width: '16px', height: '16px', borderRadius: '4px', background: '#c0392b', flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span style={{ color: 'white', fontSize: '10px' }}>✓</span>
-                        </div>
-                        <span style={{ fontSize: '13px', color: '#444', flex: 1, textDecoration: 'line-through' }}>{todo.text}</span>
-                        <button onClick={() => deleteTodo(todo.id)} style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: '16px', padding: 0 }}
-                          onMouseEnter={e => e.currentTarget.style.color = '#c0392b'}
-                          onMouseLeave={e => e.currentTarget.style.color = '#2a2a2a'}>×</button>
+                  {pending.map(todo => (
+                    <div key={todo.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 8px', borderRadius: '8px', marginBottom: '2px' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#161616'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <div onClick={() => toggleTodo(todo.id, todo.done)}
+                        style={{ width: '16px', height: '16px', borderRadius: '4px', border: '1.5px solid #333', flexShrink: 0, cursor: 'pointer' }} />
+                      <span style={{ fontSize: '13px', color: '#bbb', flex: 1, lineHeight: '1.4' }}>{todo.text}</span>
+                      <button onClick={() => deleteTodo(todo.id)} style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: '16px', padding: 0, flexShrink: 0 }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#c0392b'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#2a2a2a'}>×</button>
+                    </div>
+                  ))}
+                  {done.map(todo => (
+                    <div key={todo.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 8px', borderRadius: '8px', marginBottom: '2px', opacity: 0.5 }}>
+                      <div onClick={() => toggleTodo(todo.id, todo.done)}
+                        style={{ width: '16px', height: '16px', borderRadius: '4px', background: '#c0392b', flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ color: 'white', fontSize: '10px' }}>✓</span>
                       </div>
-                    ))}
-                  </>
-                )}
-              </div>
-            )}
+                      <span style={{ fontSize: '13px', color: '#555', flex: 1, textDecoration: 'line-through' }}>{todo.text}</span>
+                      <button onClick={() => deleteTodo(todo.id)} style={{ background: 'none', border: 'none', color: '#222', cursor: 'pointer', fontSize: '16px', padding: 0, flexShrink: 0 }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#c0392b'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#222'}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
 
-            {/* Pins Section */}
+            {/* Pins */}
             <div style={{ marginBottom: '20px' }}>
               <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>
                 Pins {filteredPins.length > 0 && `(${filteredPins.length})`}
@@ -292,10 +318,9 @@ export default function App() {
               {filteredPins.length === 0 && <div style={{ fontSize: '13px', color: '#2a2a2a', paddingBottom: '8px' }}>No pins yet</div>}
               {filteredPins.map(pin => (
                 <div key={pin.id} onClick={() => pin.msgIndex !== undefined && scrollToMessage(pin.msgIndex)}
-                  style={{ position: 'relative', padding: '10px 28px 10px 12px', background: '#161616', borderRadius: '8px', marginBottom: '6px', borderLeft: '2px solid #c0392b', cursor: pin.msgIndex !== undefined ? 'pointer' : 'default' }}
+                  style={{ position: 'relative', padding: '10px 28px 10px 12px', background: '#161616', borderRadius: '8px', marginBottom: '6px', borderLeft: '2px solid #c0392b', cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#1c1c1c'}
-                  onMouseLeave={e => e.currentTarget.style.background = '#161616'}
-                >
+                  onMouseLeave={e => e.currentTarget.style.background = '#161616'}>
                   <div style={{ fontSize: '13px', color: '#aaa', lineHeight: '1.5' }}>
                     {pin.content?.slice(0, 100)}{pin.content?.length > 100 ? '...' : ''}
                   </div>
@@ -326,16 +351,24 @@ export default function App() {
       {/* Main Chat */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
+        {/* Header */}
         <div style={{ padding: '12px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: '10px', background: '#0a0a0a', flexShrink: 0 }}>
           <button onClick={() => setPanelOpen(!panelOpen)}
             style={{ background: panelOpen ? '#161616' : 'none', border: '1px solid #1e1e1e', color: '#888', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ color: '#c0392b' }}>📌</span>
             <span>{pins.length}</span>
           </button>
-          <span style={{ fontWeight: '500', fontSize: '15px' }}>Pinned Chat</span>
+          <span style={{ fontWeight: '500', fontSize: '15px', flex: 1 }}>Pinned Chat</span>
+          <button onClick={newConversation}
+            style={{ background: 'none', border: '1px solid #1e1e1e', color: '#666', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = '#333'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = '#1e1e1e'}>
+            + New
+          </button>
         </div>
 
-        <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px' : '24px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* Messages */}
+        <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px' : '24px 20px' }}>
           <div style={{ maxWidth: '700px', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {messages.length === 0 && (
               <div style={{ textAlign: 'center', color: '#252525', marginTop: '80px', fontSize: '14px' }}>
@@ -350,8 +383,8 @@ export default function App() {
                   maxWidth: isMobile ? '88%' : '75%',
                   padding: '12px 16px',
                   borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                  background: highlightedMsg === i ? '#1a1a0a' : (msg.role === 'user' ? '#1c1c1c' : '#141414'),
-                  border: `1px solid ${highlightedMsg === i ? '#c0392b44' : (msg.role === 'user' ? '#2a2a2a' : '#1e1e1e')}`,
+                  background: highlightedMsg === i ? '#1a1500' : (msg.role === 'user' ? '#1c1c1c' : '#141414'),
+                  border: `1px solid ${highlightedMsg === i ? '#c0392b66' : (msg.role === 'user' ? '#2a2a2a' : '#1e1e1e')}`,
                   transition: 'background 0.3s, border-color 0.3s',
                   userSelect: 'text'
                 }}>
@@ -368,6 +401,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* Input */}
         <div style={{ padding: isMobile ? '12px 16px' : '14px 20px', borderTop: '1px solid #1a1a1a', background: '#0a0a0a', flexShrink: 0 }}>
           <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
             <textarea value={input} onChange={e => setInput(e.target.value)}
