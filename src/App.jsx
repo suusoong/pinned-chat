@@ -86,6 +86,8 @@ export default function App() {
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
     setInput('')
+    const ta = document.querySelector('textarea')
+if (ta) { ta.style.height = 'auto' }
     setLoading(true)
 
     try {
@@ -404,12 +406,15 @@ export default function App() {
         {/* Input */}
         <div style={{ padding: isMobile ? '12px 16px' : '14px 20px', borderTop: '1px solid #1a1a1a', background: '#0a0a0a', flexShrink: 0 }}>
           <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-            <textarea value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-              placeholder="Message..." rows={1}
-              style={{ flex: 1, padding: '11px 16px', background: '#111', border: '1px solid #1e1e1e', borderRadius: '12px', color: '#f5f5f5', fontSize: '15px', outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5', maxHeight: '120px', overflowY: 'auto' }}
-              onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
-            />
+           <textarea value={input} onChange={e => setInput(e.target.value)}
+  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
+  placeholder="Message..." rows={1}
+  style={{ flex: 1, padding: '11px 16px', background: '#111', border: '1px solid #1e1e1e', borderRadius: '12px', color: '#f5f5f5', fontSize: '15px', outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5', maxHeight: '120px', overflowY: 'auto' }}
+  onInput={e => {
+    e.target.style.height = 'auto'
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+  }}
+/>
             <button onClick={sendMessage} disabled={loading}
               style={{ padding: '11px 16px', background: loading ? '#151515' : '#f5f5f5', border: 'none', borderRadius: '12px', color: loading ? '#333' : '#0a0a0a', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '16px', fontWeight: '600', flexShrink: 0 }}>↑</button>
           </div>
