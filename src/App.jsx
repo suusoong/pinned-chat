@@ -19,6 +19,7 @@ export default function App() {
   const msgRefs = useRef({})
   const conversationDocId = useRef(null)
   const textareaRef = useRef(null)
+  const isComposing = useRef(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -54,6 +55,14 @@ export default function App() {
     setConversations(snap.docs.map(d => ({ id: d.id, ...d.data() })))
   }
 
+  const loadConversation = (convo) => {
+    setMessages(convo.messages || [])
+    setConversationId(convo.conversationId)
+    conversationDocId.current = convo.id
+    if (isMobile) setPanelOpen(false)
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+  }
+
   const newConversation = () => {
     setMessages([])
     setConversationId(Date.now().toString())
@@ -82,13 +91,14 @@ export default function App() {
   }
 
   const sendMessage = async () => {
-    if (!input.trim() || loading) return
+    if (!input.trim() || loading || isComposing.current) return
     const currentInput = input
     const userMsg = { role: 'user', content: currentInput }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
     setInput('')
     if (textareaRef.current) {
+      textareaRef.current.value = ''
       textareaRef.current.style.height = 'auto'
     }
     setLoading(true)
@@ -132,9 +142,7 @@ export default function App() {
 
   const pinMessage = async (content, msgIndex) => {
     await addDoc(collection(db, 'pins'), {
-      content,
-      msgIndex,
-      conversationId,
+      content, msgIndex, conversationId,
       createdAt: serverTimestamp()
     })
     loadPins()
@@ -146,9 +154,7 @@ export default function App() {
     if (!clean) return
     const today = new Date().toISOString().split('T')[0]
     await addDoc(collection(db, 'todos'), {
-      text: clean,
-      done: false,
-      date: today,
+      text: clean, done: false, date: today,
       createdAt: serverTimestamp()
     })
     loadTodos()
@@ -336,7 +342,9 @@ export default function App() {
               <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Recent</div>
               {filteredConvos.length === 0 && <div style={{ fontSize: '13px', color: '#2a2a2a' }}>No conversations yet</div>}
               {filteredConvos.map(c => (
-                <div key={c.id} style={{ padding: '9px 12px', background: '#161616', borderRadius: '8px', marginBottom: '6px', cursor: 'pointer' }}
+                <div key={c.id}
+                  onClick={() => loadConversation(c)}
+                  style={{ padding: '9px 12px', background: '#161616', borderRadius: '8px', marginBottom: '6px', cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#1c1c1c'}
                   onMouseLeave={e => e.currentTarget.style.background = '#161616'}>
                   <div style={{ fontSize: '13px', color: '#666' }}>{c.preview}...</div>
@@ -402,8 +410,10 @@ export default function App() {
               ref={textareaRef}
               value={input}
               onChange={e => setInput(e.target.value)}
+              onCompositionStart={() => { isComposing.current = true }}
+              onCompositionEnd={() => { isComposing.current = false }}
               onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey && !isComposing.current) {
                   e.preventDefault()
                   sendMessage()
                 }
