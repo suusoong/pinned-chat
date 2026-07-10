@@ -20,6 +20,7 @@ export default function App() {
   const conversationDocId = useRef(null)
   const textareaRef = useRef(null)
   const isComposing = useRef(false)
+  const longPressTimer = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -59,7 +60,7 @@ export default function App() {
     setMessages(convo.messages || [])
     setConversationId(convo.conversationId)
     conversationDocId.current = convo.id
-    if (isMobile) setPanelOpen(false)
+    if (window.innerWidth < 768) setPanelOpen(false)
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
 
@@ -79,9 +80,7 @@ export default function App() {
       const clean = line.replace(/^-\s*/, '').trim()
       if (clean && clean.length > 1 && clean.length < 100) {
         await addDoc(collection(db, 'todos'), {
-          text: clean,
-          done: false,
-          date: today,
+          text: clean, done: false, date: today,
           createdAt: serverTimestamp()
         })
       }
@@ -196,6 +195,21 @@ export default function App() {
     }
   }, [])
 
+  const handleTouchStart = useCallback((e, msgIndex) => {
+    longPressTimer.current = setTimeout(() => {
+      const sel = window.getSelection()
+      const text = sel?.toString().trim()
+      const touch = e.touches[0]
+      if (text && text.length > 0) {
+        setContextMenu({ x: touch.clientX, y: touch.clientY, text, msgIndex })
+      }
+    }, 600)
+  }, [])
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current)
+  }, [])
+
   const renderMessage = (content) => {
     const lines = content.split('\n')
     return lines.map((line, i) => {
@@ -203,6 +217,10 @@ export default function App() {
       if (line === '') return <div key={i} style={{ height: '5px' }} />
       const isHeader = /^\*\*[^*]+\*\*$/.test(line.trim())
       if (isHeader) return <div key={i} style={{ fontWeight: '600', color: '#eee', marginTop: i > 0 ? '10px' : 0, fontSize: '14px' }}>{line.replace(/\*\*/g, '')}</div>
+      if (line.startsWith('# ') || line.startsWith('## ') || line.startsWith('### ')) {
+        const text = line.replace(/^#+\s/, '')
+        return <div key={i} style={{ fontWeight: '600', color: '#eee', marginTop: i > 0 ? '10px' : 0, fontSize: '14px' }}>{text}</div>
+      }
       if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ color: '#ccc', fontSize: '14px', padding: '2px 0', lineHeight: '1.6' }}>• {line.slice(2)}</div>
       if (/^\d+\.\s/.test(line)) return <div key={i} style={{ color: '#ccc', fontSize: '14px', padding: '2px 0' }}>{line}</div>
       const html = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -342,8 +360,7 @@ export default function App() {
               <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Recent</div>
               {filteredConvos.length === 0 && <div style={{ fontSize: '13px', color: '#2a2a2a' }}>No conversations yet</div>}
               {filteredConvos.map(c => (
-                <div key={c.id}
-                  onClick={() => loadConversation(c)}
+                <div key={c.id} onClick={() => loadConversation(c)}
                   style={{ padding: '9px 12px', background: '#161616', borderRadius: '8px', marginBottom: '6px', cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#1c1c1c'}
                   onMouseLeave={e => e.currentTarget.style.background = '#161616'}>
@@ -375,13 +392,15 @@ export default function App() {
           <div style={{ maxWidth: '700px', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {messages.length === 0 && (
               <div style={{ textAlign: 'center', color: '#252525', marginTop: '80px', fontSize: '14px' }}>
-                Start a conversation · Right-click to pin or add todo
+                Start a conversation
               </div>
             )}
             {messages.map((msg, i) => (
               <div key={i} ref={el => msgRefs.current[i] = el}
                 onContextMenu={e => handleContextMenu(e, i)}
-                style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                onTouchStart={e => handleTouchStart(e, i)}
+                onTouchEnd={handleTouchEnd}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: '4px' }}>
                 <div style={{
                   maxWidth: isMobile ? '88%' : '75%',
                   padding: '12px 16px',
@@ -392,6 +411,22 @@ export default function App() {
                   userSelect: 'text'
                 }}>
                   {renderMessage(msg.content)}
+                </div>
+                <div style={{ display: 'flex', gap: '4px', paddingLeft: msg.role === 'user' ? 0 : '4px', paddingRight: msg.role === 'user' ? '4px' : 0 }}>
+                  <button
+                    onClick={() => pinMessage(msg.content, i)}
+                    title="Pin"
+                    style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: '13px', padding: '3px 6px', borderRadius: '4px', lineHeight: 1 }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#c0392b'}
+                    onMouseLeave={e => e.currentTarget.style.color = '#2a2a2a'}
+                  >📌</button>
+                  <button
+                    onClick={() => addTodoManual(msg.content)}
+                    title="Add to Todo"
+                    style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: '13px', padding: '3px 6px', borderRadius: '4px', lineHeight: 1 }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#888'}
+                    onMouseLeave={e => e.currentTarget.style.color = '#2a2a2a'}
+                  >✅</button>
                 </div>
               </div>
             ))}
@@ -429,7 +464,7 @@ export default function App() {
               style={{ padding: '11px 16px', background: loading ? '#151515' : '#f5f5f5', border: 'none', borderRadius: '12px', color: loading ? '#333' : '#0a0a0a', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '16px', fontWeight: '600', flexShrink: 0 }}>↑</button>
           </div>
           <div style={{ maxWidth: '700px', margin: '6px auto 0', fontSize: '11px', color: '#222', textAlign: 'center' }}>
-            Right-click to pin · Add to todo · Enter to send
+            📌 · ✅ to pin or add todo
           </div>
         </div>
       </div>
