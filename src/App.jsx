@@ -412,23 +412,6 @@ export default function App() {
                 }}>
                   {renderMessage(msg.content)}
                 </div>
-                <div style={{ display: 'flex', gap: '4px', paddingLeft: msg.role === 'user' ? 0 : '4px', paddingRight: msg.role === 'user' ? '4px' : 0 }}>
-                  <button
-                    onClick={() => pinMessage(msg.content, i)}
-                    title="Pin"
-                    style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: '13px', padding: '3px 6px', borderRadius: '4px', lineHeight: 1 }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#c0392b'}
-                    onMouseLeave={e => e.currentTarget.style.color = '#2a2a2a'}
-                  >📌</button>
-                  <button
-                    onClick={() => addTodoManual(msg.content)}
-                    title="Add to Todo"
-                    style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: '13px', padding: '3px 6px', borderRadius: '4px', lineHeight: 1 }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#888'}
-                    onMouseLeave={e => e.currentTarget.style.color = '#2a2a2a'}
-                  >✅</button>
-                </div>
-              </div>
             ))}
             {loading && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
