@@ -18,6 +18,7 @@ export default function App() {
   const chatRef = useRef(null)
   const msgRefs = useRef({})
   const conversationDocId = useRef(null)
+  const textareaRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -82,12 +83,14 @@ export default function App() {
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
-    const userMsg = { role: 'user', content: input }
+    const currentInput = input
+    const userMsg = { role: 'user', content: currentInput }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
     setInput('')
-    const ta = document.querySelector('textarea')
-if (ta) { ta.style.height = 'auto' }
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
     setLoading(true)
 
     try {
@@ -109,7 +112,7 @@ if (ta) { ta.style.height = 'auto' }
         const docRef = await addDoc(collection(db, 'conversations'), {
           conversationId,
           messages: finalMessages,
-          preview: input.slice(0, 60),
+          preview: currentInput.slice(0, 60),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         })
@@ -224,7 +227,6 @@ if (ta) { ta.style.height = 'auto' }
   return (
     <div style={{ display: 'flex', height: '100dvh', width: '100vw', overflow: 'hidden', background: '#0a0a0a', color: '#f5f5f5', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
 
-      {/* Context Menu */}
       {contextMenu && (
         <div onClick={e => e.stopPropagation()} style={{
           position: 'fixed',
@@ -250,7 +252,6 @@ if (ta) { ta.style.height = 'auto' }
         </div>
       )}
 
-      {/* Side Panel */}
       {panelOpen && (
         <div style={{
           width: isMobile ? '100vw' : '280px', minWidth: isMobile ? '100vw' : '280px',
@@ -271,8 +272,6 @@ if (ta) { ta.style.height = 'auto' }
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-
-            {/* Todos by date */}
             {Object.keys(todosByDate).sort((a, b) => b.localeCompare(a)).map(date => {
               const dateTodos = todosByDate[date].filter(t => t.text?.toLowerCase().includes(search.toLowerCase()))
               if (dateTodos.length === 0) return null
@@ -312,7 +311,6 @@ if (ta) { ta.style.height = 'auto' }
               )
             })}
 
-            {/* Pins */}
             <div style={{ marginBottom: '20px' }}>
               <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>
                 Pins {filteredPins.length > 0 && `(${filteredPins.length})`}
@@ -334,7 +332,6 @@ if (ta) { ta.style.height = 'auto' }
               ))}
             </div>
 
-            {/* Recent */}
             <div>
               <div style={{ fontSize: '10px', color: '#444', fontWeight: '700', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Recent</div>
               {filteredConvos.length === 0 && <div style={{ fontSize: '13px', color: '#2a2a2a' }}>No conversations yet</div>}
@@ -350,10 +347,7 @@ if (ta) { ta.style.height = 'auto' }
         </div>
       )}
 
-      {/* Main Chat */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-
-        {/* Header */}
         <div style={{ padding: '12px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', gap: '10px', background: '#0a0a0a', flexShrink: 0 }}>
           <button onClick={() => setPanelOpen(!panelOpen)}
             style={{ background: panelOpen ? '#161616' : 'none', border: '1px solid #1e1e1e', color: '#888', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -369,7 +363,6 @@ if (ta) { ta.style.height = 'auto' }
           </button>
         </div>
 
-        {/* Messages */}
         <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px' : '24px 20px' }}>
           <div style={{ maxWidth: '700px', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {messages.length === 0 && (
@@ -403,18 +396,25 @@ if (ta) { ta.style.height = 'auto' }
           </div>
         </div>
 
-        {/* Input */}
         <div style={{ padding: isMobile ? '12px 16px' : '14px 20px', borderTop: '1px solid #1a1a1a', background: '#0a0a0a', flexShrink: 0 }}>
           <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-           <textarea value={input} onChange={e => setInput(e.target.value)}
-  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-  placeholder="Message..." rows={1}
-  style={{ flex: 1, padding: '11px 16px', background: '#111', border: '1px solid #1e1e1e', borderRadius: '12px', color: '#f5f5f5', fontSize: '15px', outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5', maxHeight: '120px', overflowY: 'auto' }}
-  onInput={e => {
-    e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
-  }}
-/>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMessage()
+                }
+              }}
+              placeholder="Message..." rows={1}
+              style={{ flex: 1, padding: '11px 16px', background: '#111', border: '1px solid #1e1e1e', borderRadius: '12px', color: '#f5f5f5', fontSize: '15px', outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5', maxHeight: '120px', overflowY: 'auto' }}
+              onInput={e => {
+                e.target.style.height = 'auto'
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+              }}
+            />
             <button onClick={sendMessage} disabled={loading}
               style={{ padding: '11px 16px', background: loading ? '#151515' : '#f5f5f5', border: 'none', borderRadius: '12px', color: loading ? '#333' : '#0a0a0a', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '16px', fontWeight: '600', flexShrink: 0 }}>↑</button>
           </div>
